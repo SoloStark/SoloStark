@@ -1,0 +1,325 @@
+algo para la familia o amigos:
+
+
+
+```python
+import json
+from telegram import Update, InlineQueryResultArticle, InputTextMessageContent, Message, Chat, Bot
+from telegram.ext import Updater, InlineQueryHandler, CommandHandler, CallbackContext, MessageHandler, Filters
+
+# Configuración del bot de Telegram (sustituye el token por el tuyo)
+TELEGRAM_TOKEN = 'tu_token_de_telegram'
+
+# Lista de usuarios autorizados para jugar (IDs o usernames)
+ADMINS = ['@admin_usuario1', '@admin_usuario2']  # Agrega los usernames o IDs de los administradores
+JUGADORES_AUTORIZADOS = ['@jugador1', '@jugador2', '@otro_jugador']  # Usuarios autorizados para jugar
+
+# Diccionario para guardar las estadísticas de los jugadores
+estadisticas = {
+    "usuarios": {}  # Key: username, Value: {"victorias": int, "partidas": int}
+}
+
+# Archivo JSON con la configuración del juego
+configuracion = {
+    "ultimo_ganador": None,
+    "jugador1": None,
+    "jugador2": None,
+    "estado_juego": False  # Indica si hay una partida en curso
+}
+
+try:
+    with open('configuracion.json', 'r') as f:
+        configuracion = json.load(f)
+except FileNotFoundError:
+    pass
+
+# Función para guardar la configuración
+def save_config():
+    with open('configuracion.json', 'w') as f:
+        json.dump(configuracion, f)
+
+# Función para cargar las estadísticas
+def load_estadisticas():
+    try:
+        with open('estadisticas.json', 'r') as f:
+            global estadisticas
+            estadisticas = json.load(f)
+    except FileNotFoundError:
+        estadisticas = {"usuarios": {}}
+
+# Función para guardar las estadísticas
+def save_estadisticas():
+    with open('estadisticas.json', 'w') as f:
+        json.dump(estadisticas, f)
+
+# Verificar si un usuario está autorizado para jugar
+def is Authorized(user_id):
+    return any(
+        user.lower() in [user_id.username.lower(), str(user_id.id)] 
+        for user in JUGADORES_AUTORIZADOS
+    )
+
+# Función para imprimir el tablero
+def print_board(board):
+    return f" {board[0]} | {board[1]} | {board[2]} \n" \
+           "-----------\n" \
+           f" {board[3]} | {board[4]} | {board[5]} \n" \
+           "-----------\n" \
+           f" {board[6]} | {board[7]} | {board[8]} "
+
+# Función para verificar si hay un ganador
+def check_winner(board):
+    # Verificar filas
+    for i in range(0, 9, 3):
+        if board[i] == board[i+1] == board[i+2] != " ":
+            return True
+    # Verificar columnas
+    for i in range(3):
+        if board[i] == board[i+3] == board[i+6] != " ":
+            return True
+    # Verificar diagonales
+    if board[0] == board[4] == board[8] != " ":
+        return True
+    if board[2] == board[4] == board[6] != " ":
+        return True
+    # Si no hay ganador y el tablero está lleno, es un empate
+    if " " not in board:
+        return True
+    return False
+
+# Función para manejar los movimientos de los jugadores
+def handle_move(update: Update, context: CallbackContext):
+    if not configuracion["estado_juego"]:
+        message = "No hay una partida en curso."
+        context.bot.send_message(chat_id=update.message.chat.id, text=message)
+        return
+    
+    # Obtener el jugador actual
+    user = update.message.from_user
+    username = user.username or str(user.id)
+    
+    if not isAuthorized(username):
+        context.bot.send_message(
+            chat_id=update.message.chat.id,
+            text="No estás autorizado para jugar."
+        )
+        return
+    
+    # Verificar si es el jugador correcto para hacer el movimiento
+    if configuracion["jugador1"] == username:
+        current_player = 'X'
+    elif configuracion["jugador2"] == username:
+        current_player = 'O'
+    else:
+        context.bot.send_message(
+            chat_id=update.message.chat.id,
+            text="No es tu turno."
+        )
+        return
+    
+    # Obtener el movimiento del jugador
+    try:
+        move = int(update.message.text) - 1
+    except ValueError:
+        context.bot.send_message(
+            chat_id=update.message.chat.id,
+            text="Por favor ingresa un número entero entre 1 y 9."
+        )
+        return
+    
+    if 0 <= move < 9 and configuracion["tablero"][move] == " ":
+        # Hacer el movimiento
+        configuracion["tablero"][move] = current_player
+        
+        if check_winner(configuracion["tablero"]):
+            message = f"¡Felicidades {username}! Has ganado la partida."
+            context.bot.send_message(chat_id=update.message.chat.id, text=message)
+            
+            # Actualizar las estadísticas
+            if username in estadisticas["usuarios"]:
+                estadisticas["usuarios"][username]["victorias"] += 1
+                estadisticas["usuarios"][username]["partidas"] += 1
+            else:
+                estadisticas["usuarios"][username] = {
+                    "victorias": 1,
+                    "partidas": 1
+                }
+            
+            save_estadisticas()
+            save_config()  # Reiniciar la configuración para una nueva partida
+            
+            # Notificar al grupo
+            message_group = f"¡Nueva victoria de {username}! Total de victorias: 
+{estadisticas['usuarios'][username]['victorias']}"
+            context.bot.send_message(chat_id=update.message.chat.id, text=message_group)
+            
+            return
+        
+        # Cambiar al jugador contrario
+        if current_player == 'X':
+            next_player = configuracion["jugador2"]
+        else:
+            next_player = configuracion["jugador1"]
+        
+        message = f"Es tu turno @{next_player}."
+        context.bot.send_message(chat_id=update.message.chat.id, text=message)
+        
+        # Actualizar el tablero en el chat
+        board_str = print_board(configuracion["tablero"])
+        context.bot.send_message(
+            chat_id=update.message.chat.id,
+            text=f"Tablero actual:\n{board_str}"
+        )
+    else:
+        context.bot.send_message(
+            chat_id=update.message.chat.id,
+            text="Movimiento inválido. Por favor elige un número del 1 al 9 que esté vacío."
+        )
+
+# Función para manejar el comando /newgame
+def new_game(update: Update, context: CallbackContext):
+    if not configuracion["estado_juego"]:
+        # Verificar si el usuario es administrador
+        user = update.message.from_user.username or str(update.message.from_user.id)
+        if user not in ADMINS:
+            context.bot.send_message(
+                chat_id=update.message.chat.id,
+                text="No estás autorizado para iniciar una nueva partida."
+            )
+            return
+        
+        # Limpiar la configuración para una nueva partida
+        configuracion["estado_juego"] = True
+        configuracion["tablero"] = [" " for _ in range(9)]
+        
+        # Obtener dos jugadores aleatorios de los autorizados
+        from random import sample
+        try:
+            jugadores_disponibles = [usuario for usuario in JUGADORES_AUTORIZADOS 
+                                    if usuario.lower() not in [configuracion.get("jugador1", ""), 
+configuracion.get("jugador2", "")]]
+            jugador1, jugador2 = sample(jugadores_disponibles, 2)
+        except ValueError:
+            context.bot.send_message(
+                chat_id=update.message.chat.id,
+                text="No hay suficientes jugadores disponibles para iniciar una partida."
+            )
+            configuracion["estado_juego"] = False
+            save_config()
+            return
+        
+        # Configurar los jugadores
+        configuracion["jugador1"] = jugador1
+        configuracion["jugador2"] = jugador2
+        
+        # Actualizar las estadísticas iniciales si es necesario
+        for usuario in [jugador1, jugador2]:
+            if usuario not in estadisticas["usuarios"]:
+                estadisticas["usuarios"][usuario] = {
+                    "victorias": 0,
+                    "partidas": 0
+                }
+        
+        save_estadisticas()
+        save_config()
+        
+        # Notificar al grupo
+        message = f"¡Nueva partida iniciada! Jugadores: {jugador1} vs {jugador2}\n" \
+                  f"Estadísticas iniciales:\n" \
+                  f"{jugador1}: Victorias - {estadisticas['usuarios'][jugador1]['victorias']} | Partidas - 
+{estadisticas['usuarios'][jugador1]['partidas']}\n" \
+                  f"{jugador2}: Victorias - {estadisticas['usuarios'][jugador2]['victorias']} | Partidas - 
+{estadisticas['usuarios'][jugador2]['partidas']}"
+        context.bot.send_message(chat_id=update.message.chat.id, text=message)
+        
+        # Mostrar el tablero inicial
+        board_str = print_board(configuracion["tablero"])
+        context.bot.send_message(
+            chat_id=update.message.chat.id,
+            text=f"Tablero:\n{board_str}"
+        )
+    else:
+        context.bot.send_message(
+            chat_id=update.message.chat.id,
+            text="Ya hay una partida en curso. Si quieres iniciar otra, espera a que termine la actual o usa /reset."
+        )
+
+# Función para manejar el comando /stats
+def show_stats(update: Update, context: CallbackContext):
+    message = "Estadísticas de los jugadores:\n\n"
+    for usuario in estadisticas["usuarios"]:
+        victories = estadisticas["usuarios"][usuario]["victorias"]
+        partidas = estadisticas["usuarios"][usuario]["partidas"]
+        message += f"@{usuario} - Victorias: {victories} | Total de Partidas: {partidas}\n"
+    context.bot.send_message(chat_id=update.message.chat.id, text=message)
+
+# Función para manejar el comando /reset
+def reset_game(update: Update, context: CallbackContext):
+    if configuracion["estado_juego"]:
+        user = update.message.from_user.username or str(update.message.from_user.id)
+        if user in ADMINS:
+            # Reiniciar la configuración
+            configuracion["estado_juego"] = False
+            configuracion["jugador1"] = ""
+            configuracion["jugador2"] = ""
+            configuracion["tablero"] = [" " for _ in range(9)]
+            
+            save_config()
+            
+            message = "Partida reiniciada. Puedes iniciar una nueva usando /newgame."
+            context.bot.send_message(chat_id=update.message.chat.id, text=message)
+        else:
+            context.bot.send_message(
+                chat_id=update.message.chat.id,
+                text="No estás autorizado para reiniciar la partida."
+            )
+    else:
+        message = "No hay una partida en curso que pueda reiniciarse."
+        context.bot.send_message(chat_id=update.message.chat.id, text=message)
+
+# Función para manejar comandos de ayuda
+def help(update: Update, context: CallbackContext):
+    message = "/newgame - Inicia una nueva partida\n" \
+              "/reset - Reinicia la partida actual (solo administradores)\n" \
+              "/stats - Ver estadísticas de los jugadores"
+    context.bot.send_message(chat_id=update.message.chat.id, text=message)
+
+# Configurar el bot
+def main():
+    # Inicializar los archivos JSON
+    load_estadisticas()
+    
+    # Crear updater y dispatcher
+    updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
+    
+    # Manejadores de comandos
+    dispatcher.add_handler(CommandHandler("newgame", new_game))
+    dispatcher.add_handler(CommandHandler("reset", reset_game))
+    dispatcher.add_handler(CommandHandler("stats", show_stats))
+    dispatcher.add_handler(MessageHandler(Filters.text & (~Filters.command), handle_move))
+    dispatcher.add_handler(CommandHandler("help", help))
+    
+    # Iniciar el bot
+    updater.start_polling()
+
+if __name__ == "__main__":
+    main()
+```
+
+Este código introduce varias mejoras para un grupo familiar:
+
+1. **Autorizaciones específicas**: Solo usuarios autorizados pueden jugar.
+2. **Notificaciones al grupo**: Cuando se inicia una nueva partida o cuando alguien gana, se notifica al grupo entero.
+3. **Estadísticas personalizadas**: Se guardan las victorias y partidas totales de cada jugador.
+4. **Reinicio del juego**: Solo los administradores pueden reiniciar el juego.
+5. **Comandos específicos**: Comandos como `/newgame`, `/reset`, `/stats` y `/help` para controlar el juego.
+
+Para usar esta versión:
+
+1. Configura la lista de administradores (`ADMINS`) con los usuarios que puedan reiniciar el juego.
+2. Configura la lista de jugadores autorizados (`JUGADORES_AUTORIZADOS`) con los usuarios que pueden jugar.
+3. Asegúrate de que los usuarios estén en el grupo Telegram y tengan los usernames correctos.
+
+El bot ahora es más robusto para un entorno familiar, donde solo ciertos miembros del grupo pueden jugar y el resto 
+pueden observar y disfrutar del juego.
